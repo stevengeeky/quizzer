@@ -6,6 +6,22 @@ var mentioned = 1;
 
 var lname = "quiz";
 
+var mode = "edit";		// edit | take | results
+var attempt = null;		// {order, pos, results, start, retry}
+var checked = false;	// current question has been checked
+var autosaveTimer = null;
+
+var STORAGE_EDITOR = "quizzer.editor";
+var STORAGE_ATTEMPT = "quizzer.attempt";
+
+// The quiz shown when nothing has been saved yet
+var SAMPLE = "(mc)\nWhich planet is closest to the Sun?\n{CHECKED}Mercury\nVenus\nEarth\nMars\n{WHY}Mercury orbits about 58 million km from the Sun, less than half of Earth's distance.\n\n"
+	+ "(fitb)\nThe largest planet in the solar system is ___.\nJupiter\n{WHY}Jupiter is more than twice as massive as every other planet put together.\n"
+	+ "(mc)\nHow many moons does Mars have?\n0\n1\n{CHECKED}2\n4\n{WHY}Phobos and Deimos, both discovered in 1877.\n\n"
+	+ "(fitb)\nLight from the Sun takes about ___ minutes to reach Earth.\n?!(8|eight)\n{WHY}8 minutes 20 seconds on average. The answer accepts either '8' or 'eight' (the ?!( ) syntax).\n"
+	+ "(mat)\nMars\nthe red planet\nSaturn\nthe brightest rings\nVenus\nthe hottest surface\nNeptune\nthe farthest planet\n{WHY}Venus is hotter than Mercury because its thick atmosphere traps heat.\n\n"
+	+ "(mc)\nWhich of these is a dwarf planet?\nTitan\n{CHECKED}Pluto\nEuropa\nGanymede\n{WHY}Pluto was reclassified as a dwarf planet in 2006; the other three are moons.\n\n";
+
 window.onload = function()
 {
 	container = document.createElement("div");
@@ -18,8 +34,11 @@ window.onload = function()
 	disp.appendChild(container);
 	document.body.appendChild(qdiv);
 	
-	qdiv.innerHTML = "<p id='qstuff'><button id='additem' onclick='addfitb()'>Add Fill-in-the-Blank</button> <button id='additem' onclick='addmc()'>Add Multiple Choice</button></label><button id='additem' onclick='addmat()'>Add Matching</button> <button onclick='randomize()'>Randomize</button> <button onclick='clearQuiz()'>Clear Quiz</button> <button onclick='initSpeech()'>Dictate</button><br /><button id='assemble' onclick='doquiz()'>Assemble Quiz</button><button onclick='saveFile();'>Save Quiz</button><button onclick='$(\"uquiz\").click()'>Open Quiz</button><input style='border:none;display:none;' id='uquiz' onchange='uploadquiz()' type='file' multiple /><button onclick='fitbtomat()'>Change FITBs to Matching</button></font></p>";
+	qdiv.innerHTML = "<p id='qstuff'><button id='additem' onclick='addfitb()'>Add Fill-in-the-Blank</button> <button id='additem' onclick='addmc()'>Add Multiple Choice</button></label><button id='additem' onclick='addmat()'>Add Matching</button> <button onclick='randomize()'>Randomize</button> <button onclick='clearQuiz()'>Clear Quiz</button> <button onclick='initSpeech()'>Dictate</button><br /><button id='assemble' onclick='doquiz()'>Assemble Quiz</button><button onclick='saveFile();'>Save Quiz</button><button onclick='$(\"uquiz\").click()'>Open Quiz</button><input style='border:none;display:none;' id='uquiz' onchange='uploadquiz()' type='file' multiple /><button onclick='showPaste()'>Paste Quiz</button><button onclick='fitbtomat()'>Change FITBs to Matching</button></font></p>";
 	container.innerHTML = "<p></p>";
+	
+	container.addEventListener("input", autosave);
+	document.addEventListener("keydown", doTakeKeys);
 	
 	container.ondragover = dodrag;
 	container.ondragleave = dodragleave;
@@ -32,6 +51,12 @@ window.onload = function()
 	doresize();
 	window.onresize = doresize;
 	//initSpeech();
+	
+	var saved = load(STORAGE_EDITOR);
+	readScript(saved || SAMPLE);
+	
+	var pending = load(STORAGE_ATTEMPT);
+	if (pending) showResume(pending);
 	
 	//var msg = new SpeechSynthesisUtterance("Ok Google, tell me what my life story is.");
 	//window.speechSynthesis.speak(msg);
@@ -310,11 +335,12 @@ function addfitb()
 	answers.push(ans);
 	var newel = document.createElement("p");
 	newel.id = "fitb";
-	newel.innerHTML = "Question " + qval + "<br /><input class='fsize' placeholder='Question' onpaste='dofitbpaste(this, event)' x-webkit-speech/><br /><input class='fsize' placeholder='Answer' x-webkit-speech/><span id='qop'><button class='bremove' onclick='doRemoveEl(this)'>Remove Question</button></span>";
+	newel.innerHTML = "Question " + qval + "<br /><input class='fsize' placeholder='Question' onpaste='dofitbpaste(this, event)' x-webkit-speech/><br /><input class='fsize' placeholder='Answer' x-webkit-speech/><span id='qop'><br /><input class='fsize why' placeholder='Explanation (optional, shown after answering)' /><br /><button class='bremove' onclick='doRemoveEl(this)'>Remove Question</button></span>";
 	container.appendChild(newel);
 	
 	qval++;
 	container.children[container.children.length - 1].children[1].focus();
+	autosave();
 }
 
 function addmc()
@@ -323,11 +349,12 @@ function addmc()
 	answers.push(ans);
 	var newel = document.createElement("p");
 	newel.id = "mc";
-	newel.innerHTML = "Question " + qval + "<br /><input class='fsize' placeholder='Question' onpaste='dopaste(this, event)' /><br /><label><input name='op" + qval + "' type='radio' /><input class='fsize' /></label><span id='qop'><button onclick='addmcq(this.parentElement.parentElement)'>Add Option</button><button onclick='removemcq(this.parentElement.parentElement)'>Remove Option</button><br /><button class='bremove' onclick='doRemoveEl(this)'>Remove Question</button></span>";
+	newel.innerHTML = "Question " + qval + "<br /><input class='fsize' placeholder='Question' onpaste='dopaste(this, event)' /><br /><label><input name='op" + qval + "' type='radio' /><input class='fsize' /></label><span id='qop'><input class='fsize why' placeholder='Explanation (optional, shown after answering)' /><br /><button onclick='addmcq(this.parentElement.parentElement)'>Add Option</button><button onclick='removemcq(this.parentElement.parentElement)'>Remove Option</button><br /><button class='bremove' onclick='doRemoveEl(this)'>Remove Question</button></span>";
 	container.appendChild(newel);
 	
 	qval++;
 	container.children[container.children.length - 1].children[1].focus();
+	autosave();
 }
 
 function addmcq(el)
@@ -354,11 +381,12 @@ function addmat()
 	answers.push(ans);
 	var newel = document.createElement("p");
 	newel.id = "mat";
-	newel.innerHTML = "Question " + qval + "<br /><label><input class='ssize' placeholder='Match' /> <input class='ssize' placeholder='Definition' /></label><br /><span id='qop'><button onclick='addmd(this.parentElement.parentElement)'>Add Match</button><button onclick='removemd(this.parentElement.parentElement)'>Remove Match</button><br /><button class='bremove' onclick='doRemoveEl(this)'>Remove Question</button></span>";
+	newel.innerHTML = "Question " + qval + "<br /><label><input class='ssize' placeholder='Match' /> <input class='ssize' placeholder='Definition' /></label><br /><span id='qop'><input class='fsize why' placeholder='Explanation (optional, shown after answering)' /><br /><button onclick='addmd(this.parentElement.parentElement)'>Add Match</button><button onclick='removemd(this.parentElement.parentElement)'>Remove Match</button><br /><button class='bremove' onclick='doRemoveEl(this)'>Remove Question</button></span>";
 
 	container.appendChild(newel);
 	qval++;
 	container.children[container.children.length - 1].children[1].focus();
+	autosave();
 }
 
 function addmd(el)
@@ -556,6 +584,7 @@ function removec(i)
 		var ih = container.children[j].innerHTML;
 		container.children[j].innerHTML = "Question " + (j) + ih.substring(ih.indexOf("<br"));
 	}
+	autosave();
 }
 
 function doreplace(s)
@@ -576,47 +605,36 @@ function ascii(s)
 	return s.charCodeAt(0);
 }
 
-function doQkeyDown(e, el)
-{
-	var fc = +findchild(container, el.parentElement);
-	var pel = el.parentElement;
-	if (e.keyCode == 13)
-	{
-		if (e.ctrlKey) doresults();
-		else if (e.shiftKey && pel.previousSibling && pel.previousSibling.id == "fitb") pel.previousSibling.children[2].focus();
-		else if (pel.nextSibling.id.replace(/fitb|mc|mat/g, "") == pel.nextSibling.id) doresults();
-		else if (!e.shiftKey && pel.nextSibling.id == "fitb") pel.nextSibling.children[2].focus();
-	}
-}
-
 function Key(k, d)
 {
 	this.value = k;
 	this.def = d;
 }
 
-function doquiz()
+function why(el)
 {
-	if (answers.length == 0) return;
-	var res = "";
-	thtml = gethtml();
-	qdiv.style.display = "none";
-	doresize();
-	
+	var w = el.querySelector(".why");
+	return w ? w.value : "";
+}
+
+// Reads the editor into answers[] (the correct answers and the text of every question)
+function prepareAnswers()
+{
 	for (var i in answers)
 	{
 		var a = container.children[(+i + 1)];
-		if (answers[i].type == "fitb" && a != undefined)
+		if (a == undefined) continue;
+		answers[i].why = why(a);
+		
+		if (answers[i].type == "fitb")
 		{
-			res += "<p id='fitb'>Question " + (+i + 1) + "<br />" + doreplace(a.children[1].value) + "<br /><input onkeydown='doQkeyDown(event, this);' /></p>";
+			answers[i].qtext = a.children[1].value;
 			var v = a.children[3].value || "";
 			answers[i].rvalue = v;
 			answers[i].value = v.toLowerCase().replace(/ /g, "");
 		}
-		else if (answers[i].type == "mat" && a != undefined)
+		else if (answers[i].type == "mat")
 		{
-			res += "<p id='mat'>";
-			var keys = [];
 			var mats = [];
 			var tdef = [];
 			var ans = answers[i];
@@ -627,166 +645,346 @@ function doquiz()
 				var tmat = a.children[j];
 				if (tmat.children[1] != undefined)
 				{
-					keys.push(new Key(tmat.firstChild.value, tmat.children[1].value));
 					mats.push(tmat.firstChild.value);
 					tdef.push(tmat.children[1].value);
 					
 					ans.rvalue += tmat.firstChild.value + ") " + tmat.children[1].value + ", ";
 				}
-				if (ans.rvalue != "") ans.rvalue = ans.rvalue.substring(0, ans.rvalue.length - 2);
 			}
+			if (ans.rvalue != "") ans.rvalue = ans.rvalue.substring(0, ans.rvalue.length - 2);
 			ans.ma = clone(mats);
 			ans.mb = clone(tdef);
-			
-			for (var j = 0; j < mats.length; j++)
-			{
-				var temp = mats[j];
-				var rswitch = Math.floor(Math.random() * mats.length);
-				mats[j] = mats[rswitch];
-				mats[rswitch] = temp;
-			}
-			res += "<label class='keys'>";
-			var lets = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-			for (var j in mats)
-				res += "<input size='1' maxlength='1' class='linput' /><label>" + doreplace(mats[j]) + "</label><br />";
-			
-			res += "</label><label class='defs'>";
-			for (var j in tdef)
-			{
-				if (j >= lets.length) break;
-				res += "<label id='def" + lets[j] + (+i + 1) + "'>" + lets[j] + ".) " + doreplace(tdef[j]) + "</label><br />";
-			}
-			
-			res += "</label></p>";
 		}
-		else if (a != undefined)
+		else
 		{
 			var sel = -1;
-			res += "<p id='mc'>Question " + (+i + 1) + "<br />" + doencode(a.children[1].value) + "<br />";
+			answers[i].qtext = a.children[1].value;
+			answers[i].choices = [];
 			for (var j = 3; j < a.children.length - 1; j++)
 			{
 				var choice = a.children[j];
-				if (choice.children[0] != null) 
+				if (choice.children[0] != null)
 				{
-					if (choice.firstChild.checked) sel = j - 3;
-					res += "<label><input type='radio' name='cop" + i + "' />" + doencode(choice.children[1].value) + "</label><br />";
+					if (choice.firstChild.checked) sel = answers[i].choices.length;
+					answers[i].choices.push(choice.children[1].value);
 				}
 			}
 			
 			answers[i].value = sel;
-			if (sel != -1) answers[i].cvalue = a.children[sel + 3].children[1].value;
-			res += "</p>";
+			answers[i].cvalue = (sel != -1) ? answers[i].choices[sel] : "";
 		}
 	}
-	res += "<button onclick='doresults()'>Show Results</button> <button onclick='qdiv.style.display = \"block\";container.innerHTML = thtml;doresize();'>Return to Editing Quiz</button>";
+}
+
+function doquiz()
+{
+	if (answers.length == 0) return;
+	thtml = gethtml();
+	var script = compileScript();
+	qdiv.style.display = "none";
+	doresize();
+	
+	prepareAnswers();
+	
+	var order = [];
+	for (var i = 0; i < answers.length; i++) order.push(i);
+	attempt = {script:script, order:order, pos:0, results:[], start:Date.now(), retry:false};
+	showQuestion();
+}
+
+// One question at a time
+function showQuestion()
+{
+	mode = "take";
+	checked = false;
+	var i = attempt.order[attempt.pos];
+	var ans = answers[i];
+	var res = "<p class='qhead'>Question " + (attempt.pos + 1) + " of " + attempt.order.length + (attempt.retry ? " (retrying missed)" : "") + " &middot; " + countCorrect() + " correct</p>";
+	
+	if (ans.type == "fitb")
+	{
+		res += "<p id='fitb' class='q'>" + doreplace(ans.qtext) + "<br /><input class='qin' autocomplete='off' /></p>";
+	}
+	else if (ans.type == "mat")
+	{
+		var mats = clone(ans.ma);
+		var tdef = ans.mb;
+		res += "<p id='mat' class='q'>";
+		
+		for (var j = 0; j < mats.length; j++)
+		{
+			var temp = mats[j];
+			var rswitch = Math.floor(Math.random() * mats.length);
+			mats[j] = mats[rswitch];
+			mats[rswitch] = temp;
+		}
+		res += "<label class='keys'>";
+		var lets = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+		for (var j in mats)
+			res += "<input size='1' maxlength='1' class='linput' autocomplete='off' /><label>" + doreplace(mats[j]) + "</label><br />";
+		
+		res += "</label><label class='defs'>";
+		for (var j in tdef)
+		{
+			if (j >= lets.length) break;
+			res += "<label id='def" + lets[j] + (+i + 1) + "'>" + lets[j] + ".) " + doreplace(tdef[j]) + "</label><br />";
+		}
+		
+		res += "</label></p>";
+	}
+	else
+	{
+		res += "<p id='mc' class='q'>" + doencode(ans.qtext) + "<br />";
+		for (var j = 0; j < ans.choices.length; j++)
+			res += "<label class='choice'><input type='radio' name='cop" + i + "' /><span class='num'>" + (j + 1) + "</span> " + doencode(ans.choices[j]) + "</label>";
+		res += "</p>";
+	}
+	res += "<div id='feedback'></div>";
+	res += "<p class='qnav'><button id='check' onclick='checkAnswer()'>Check</button> <button onclick='stopQuiz()'>Return to Editing Quiz</button><span class='hint'>1&ndash;9 picks a choice, enter checks and moves on</span></p>";
 	container.innerHTML = res;
 	container.scrollTop = 0;
-	var fc = container.firstChild;
 	
-	if (fc.id == "mat") fc.firstChild.firstChild.focus();
-	else fc.children[2].focus();
+	var q = container.children[1];
+	if (ans.type == "mat") q.firstChild.firstChild.focus();
+	else if (ans.type == "fitb") q.children[1].focus();
+	else if (document.activeElement) document.activeElement.blur();
+}
+
+function countCorrect()
+{
+	var n = 0;
+	for (var i in attempt.results)
+		if (attempt.results[i] && attempt.results[i].correct) n++;
+	return n;
+}
+
+// Grades the question element ch against answers[i]
+function grade(i, ch)
+{
+	var correct = false;
+	var cans = "";
+	var sans = "";
+	var unans = false;
+	
+	if (answers[i].type == "fitb")
+	{
+		var inp = ch.querySelector(".qin");
+		cans = answers[i].value;
+		sans = inp.value.toLowerCase().replace(/ /g, "");
+		if (sans.replace(/\t|\n/g, "") == "") unans = true;
+		
+		var pc = parseCorrect(cans, sans);
+		correct = pc.correct;
+		
+		cans = answers[i].rvalue.replace(/\?\!\(/g, "{choose}(");
+		cans = cans.replace(/\?\?\(/g, "{option}(");
+		sans = inp.value;
+	}
+	else if (answers[i].type == "mat")
+	{
+		var ma = answers[i].ma;
+		var mb = answers[i].mb;
+		var tch = ch.firstChild;
+		correct = true;
+		unans = true;
+		
+		for (var j = 1; j < tch.children.length; j += 3)
+		{
+			var k = tch.children[j];
+			var l = tch.children[j - 1];
+			var rval = mb[ma.indexOf(k.textContent)];
+			
+			var tid = "def" + l.value.toUpperCase() + (+i + 1);
+			var ival = document.getElementById(tid);
+			ival = (ival != undefined) ? ival.textContent.substring(4) : "";
+			if (ival != "") unans = false;
+			
+			if (ival != rval) correct = false;
+			sans += "'" + ival + "', ";
+			cans += "'" + rval + "', ";
+		}
+		if (sans.length > 0)
+		{
+			sans = sans.substring(0, sans.length - 2);
+			cans = cans.substring(0, cans.length - 2);
+		}
+	}
+	else
+	{
+		var sel = -1;
+		var choices = ch.querySelectorAll(".choice");
+		for (var j = 0; j < choices.length; j++)
+		{
+			if (choices[j].firstChild.checked)
+			{
+				sel = j;
+				break;
+			}
+		}
+		cans = answers[i].cvalue;
+		if (sel == -1) unans = true;
+		else sans = answers[i].choices[sel];
+		if (sel == answers[i].value) correct = true;
+	}
+	return {correct:correct, unans:unans, cans:cans, sans:sans};
+}
+
+function checkAnswer()
+{
+	if (mode != "take" || checked) return;
+	var i = attempt.order[attempt.pos];
+	var ch = container.children[1];
+	var r = grade(i, ch);
+	attempt.results[i] = r;
+	checked = true;
+	
+	var fb = $("feedback");
+	if (r.unans)
+		fb.innerHTML = "<p id='unanswered'>No answer given.  The correct answer is <font color='brown'>\"" + doencode(r.cans) + "\"</font></p>";
+	else if (r.correct)
+		fb.innerHTML = "<p id='correct'>Correct.  The provided answer was <font color='brown'>\"" + doencode(r.sans) + "\"</font></p>";
+	else
+		fb.innerHTML = "<p id='incorrect'>Incorrect.  The correct answer was <font color='brown'>\"" + doencode(r.cans) + "\"</font>.  You input <font color='brown'>\"" + doencode(r.sans) + "\"</font></p>";
+	if (answers[i].why)
+		fb.innerHTML += "<p class='why'>" + doencode(answers[i].why) + "</p>";
+	
+	// lock the question and mark the right choice
+	var inps = ch.getElementsByTagName("input");
+	for (var j = 0; j < inps.length; j++) inps[j].disabled = true;
+	if (answers[i].type == "mc")
+	{
+		var choices = ch.querySelectorAll(".choice");
+		for (var j = 0; j < choices.length; j++)
+		{
+			if (j == answers[i].value) choices[j].className += " right";
+			else if (choices[j].firstChild.checked) choices[j].className += " wrong";
+		}
+	}
+	
+	var b = $("check");
+	b.innerHTML = (attempt.pos + 1 >= attempt.order.length) ? "See Results" : "Next";
+	b.onclick = nextQuestion;
+	b.focus();
+	
+	saveAttempt();
+}
+
+function nextQuestion()
+{
+	if (mode != "take" || !checked) return;
+	attempt.pos++;
+	if (attempt.pos >= attempt.order.length) doresults();
+	else showQuestion();
+}
+
+function doTakeKeys(e)
+{
+	if (mode != "take" || e.ctrlKey || e.metaKey || e.altKey) return;
+	var t = e.target;
+	var typing = t && (t.tagName == "TEXTAREA" || (t.tagName == "INPUT" && t.type != "radio" && t.type != "checkbox"));
+	
+	if (e.key == "Enter")
+	{
+		if (t && (t.tagName == "TEXTAREA" || (t.tagName == "BUTTON" && t.id != "check"))) return;
+		e.preventDefault();
+		if (!checked) checkAnswer();
+		else nextQuestion();
+	}
+	else if (e.key >= "1" && e.key <= "9" && !typing && !checked)
+	{
+		var i = attempt.order[attempt.pos];
+		if (answers[i].type != "mc") return;
+		var choices = container.children[1].querySelectorAll(".choice");
+		var n = +e.key - 1;
+		if (n < choices.length)
+		{
+			e.preventDefault();
+			choices[n].firstChild.checked = true;
+		}
+	}
+}
+
+function stopQuiz()
+{
+	mode = "edit";
+	attempt = null;
+	forget(STORAGE_ATTEMPT);
+	qdiv.style.display = "block";
+	container.innerHTML = thtml;
+	doresize();
+}
+
+function retake()
+{
+	container.innerHTML = thtml;
+	doquiz();
+}
+
+function retryMissed()
+{
+	var missed = missedQuestions();
+	if (missed.length == 0) return;
+	attempt = {script:attempt.script, order:missed, pos:0, results:[], start:Date.now(), retry:true};
+	showQuestion();
+}
+
+function missedQuestions()
+{
+	var res = [];
+	for (var k = 0; k < attempt.order.length; k++)
+	{
+		var i = attempt.order[k];
+		var r = attempt.results[i];
+		if (!r || !r.correct) res.push(i);
+	}
+	return res;
 }
 
 function doresults()
 {
+	mode = "results";
+	forget(STORAGE_ATTEMPT);
 	var res = "";
 	qdiv.style.display = "none";
 	var tcor = 0;
-	var outof = +answers.length;
+	var outof = attempt.order.length;
+	var missed = missedQuestions();
 	
-	for (var i in container.children)
+	for (var k = 0; k < attempt.order.length; k++)
 	{
-		if (i >= answers.length)
-			break;
-		var ch = container.children[i];
-		
-		var correct = false;
-		var cans = "";
-		var sans = "";
-		var unans = false;
-		
-		if (answers[i].type == "fitb" && ch.children[2] != undefined)
-		{
-			cans = answers[i].value;
-			sans = ch.children[2].value.toLowerCase().replace(/ /g, "");
-			if (sans.replace(/\t|\n/g, "") == "") unans = true;
-			
-			var pc = parseCorrect(cans, sans);
-			cans = pc.cans;
-			sans = pc.sans;
-			correct = pc.correct;
-			
-			cans = answers[i].rvalue.replace(/\?\!\(/g, "{choose}(");
-			cans = cans.replace(/\?\?\(/g, "{option}(");
-			sans = ch.children[2].value;
-		}
-		else if (answers[i].type == "mat")
-		{
-			var ma = answers[i].ma;
-			var mb = answers[i].mb;
-			var tch = ch.firstChild;
-			correct = true;
-			unans = true;
-			
-			for (var j = 1; j < tch.children.length; j += 3)
-			{
-				var k = tch.children[j];
-				var l = tch.children[j - 1];
-				var rval = mb[ma.indexOf(k.innerHTML)];
-				
-				var tid = "def" + l.value.toUpperCase() + (+i + 1);
-				var ival = document.getElementById(tid);
-				ival = (ival != undefined) ? ival.innerHTML.substring(4) : "";
-				if (ival != "") unans = false;
-				
-				if (ival != rval) correct = false;
-				sans += "'" + ival + "', ";
-				cans += "'" + rval + "', ";
-			}
-			if (sans.length > 0)
-			{
-				sans = sans.substring(0, sans.length - 2);
-				cans = cans.substring(0, cans.length - 2);
-			}
-		}
-		else
-		{
-			var sel = -1;
-			for (var j = 2; j < ch.children.length; j++)
-			{
-				var choice = ch.children[j];
-				if (choice.children[0] != null) 
-				{
-					if (choice.firstChild.checked)
-					{
-						sel = j - 2;
-						break;
-					}
-				}
-			}
-			cans = answers[i].cvalue;
-			if (ch.children[sel + 2] != undefined)
-				sans = ch.children[sel + 2].innerHTML.replace(/<.*?>/g, "");
-			else
-				break;
-			if (sel == -1) unans = true;
-			if (sel == answers[i].value) correct = true;
-		}
-		
-		if (unans)
-		{
-			res += "<p id='unanswered'>Question " + (+i + 1) + " does not have an answer.  (The correct answer is <font color='brown'>\"" + doencode(cans) + "\"</font>)</p>";
-			outof--;
-		}
-		else if (correct)
-		{
-			res += "<p id='correct'>Question " + (+i + 1) + " is correct.  The provided answer was <font color='brown'>\"" + doencode(sans) + "\"</font></p>";
-			tcor++;
-		}
-		else
-			res += "<p id='incorrect'>Question " + (+i + 1) + " is incorrect.  The correct answer was <font color='brown'>\"" + doencode(cans) + "\"</font>.  You input <font color='brown'>\"" + doencode(sans) + "\"</font></p>";
+		var i = attempt.order[k];
+		var r = attempt.results[i] || {unans:true, cans:"", sans:""};
+		if (r.unans) outof--;
+		else if (r.correct) tcor++;
 	}
-	res += dograde(tcor, outof) + "<button onclick='container.innerHTML = thtml;doquiz();'>Retake Quiz</button> <button onclick='qdiv.style.display = \"block\";container.innerHTML = thtml;doresize();'>Return to Editing Quiz</button>";
+	
+	var secs = Math.round((Date.now() - attempt.start) / 1000);
+	res += "<p class='qhead'>Results" + (attempt.retry ? " (retry of missed questions)" : "") + "</p>";
+	res += dograde(tcor, outof);
+	res += "<p id='time'><b>Time: " + Math.floor(secs / 60) + ":" + (secs % 60 < 10 ? "0" : "") + (secs % 60) + "</b></p>";
+	
+	if (missed.length == 0)
+		res += "<p id='correct'>Every question answered correctly.</p>";
+	else
+	{
+		res += "<p class='qhead'>Missed</p>";
+		for (var k = 0; k < missed.length; k++)
+		{
+			var i = missed[k];
+			var r = attempt.results[i] || {unans:true, cans:"", sans:""};
+			var qt = answers[i].type == "mat" ? "Matching" : answers[i].qtext;
+			if (r.unans)
+				res += "<p id='unanswered'>Question " + (+i + 1) + ": " + doencode(qt) + "<br />No answer given.  (The correct answer is <font color='brown'>\"" + doencode(r.cans) + "\"</font>)";
+			else
+				res += "<p id='incorrect'>Question " + (+i + 1) + ": " + doencode(qt) + "<br />The correct answer was <font color='brown'>\"" + doencode(r.cans) + "\"</font>.  You input <font color='brown'>\"" + doencode(r.sans) + "\"</font>";
+			if (answers[i].why) res += "<br /><i>" + doencode(answers[i].why) + "</i>";
+			res += "</p>";
+		}
+	}
+	
+	res += "<p class='qnav'>";
+	if (missed.length > 0) res += "<button id='retry' onclick='retryMissed()'>Retry Missed Only (" + missed.length + ")</button> ";
+	res += "<button onclick='retake()'>Retake Quiz</button> <button onclick='stopQuiz()'>Return to Editing Quiz</button></p>";
 	container.innerHTML = res;
 	container.scrollTop = 0;
 }
@@ -1073,6 +1271,7 @@ function clear()
 		container.removeChild(container.children[1]);
 	qval = 1;
 	answers = [];
+	autosave();
 }
 
 function compileScript()
@@ -1085,6 +1284,7 @@ function compileScript()
 		if (ch.id == "fitb")
 		{
 			res += "(fitb)\n" + ch.children[1].value + "\n" + ch.children[3].value + "\n";
+			if (why(ch)) res += "{WHY}" + why(ch) + "\n";
 		}
 		else if (ch.id == "mat")
 		{
@@ -1094,6 +1294,7 @@ function compileScript()
 				var tch = ch.children[j];
 				res += tch.firstChild.value + "\n" + tch.children[1].value + "\n";
 			}
+			if (why(ch)) res += "{WHY}" + why(ch) + "\n";
 			res += "\n";
 		}
 		else
@@ -1106,80 +1307,275 @@ function compileScript()
 				if (tch.firstChild.checked) res += "{CHECKED}" + tch.children[1].value + "\n";
 				else res += tch.children[1].value + "\n";
 			}
+			if (why(ch)) res += "{WHY}" + why(ch) + "\n";
 			res += "\n";
 		}
 	}
 	return res;
 }
 
+// Reads a quiz in the plain-text (.qz) format or as json and adds its questions to the editor
 function readScript(s)
 {
-	while (s.substring(s.length - 3) == "\n\n\n") s = s.substring(0, s.length - 1);
-	while (s.replace(/\(ma\)|\(fitb\)|\(mat\)/g, "") != s)
+	var list;
+	var t = s.replace(/^\s+/, "");
+	if (t.substring(0, 1) == "{" || t.substring(0, 1) == "[") list = parseJSON(t);
+	else list = parseScript(s);
+	
+	for (var i in list)
 	{
-		var sps = s.split("\n");
-		var ovt = 0;
-		var sm = s.match(/\(mc\)|\(fitb\)|\(mat\)/g)[0];
-		
-		if (sm == "(mc)")
+		var q = list[i];
+		var ch;
+		if (q.type == "mc")
 		{
 			addmc();
-			var si = sps.indexOf("(mc)");
-			ovt = si + 5;
-			
-			var ch = container.children[container.children.length - 1];
-			ch.children[1].value = sps[si + 1];
-			var spn = sps.indexOf("", si);
-			
-			for (var i = 3; i <= 2 * (spn - si); i += 2)
+			ch = container.children[container.children.length - 1];
+			ch.children[1].value = q.question || "";
+			var choices = q.choices || [];
+			for (var j = 0; j < choices.length; j++)
 			{
-				if (i > 3) addmcq(ch);
-				var ts = sps[si + (i + 1) / 2];
-				ovt += ts.length + 1;
-				
+				if (j > 0) addmcq(ch);
+				var lab = ch.children[3 + 2 * j];
+				lab.children[1].value = choices[j];
+				if (j == q.answer) lab.firstChild.checked = true;
+			}
+		}
+		else if (q.type == "mat")
+		{
+			addmat();
+			ch = container.children[container.children.length - 1];
+			var pairs = q.pairs || [];
+			for (var j = 0; j < pairs.length; j++)
+			{
+				if (j > 0) addmd(ch);
+				var lab = ch.children[1 + 2 * j];
+				lab.firstChild.value = pairs[j][0];
+				lab.children[1].value = pairs[j][1];
+			}
+		}
+		else if (q.type == "fitb")
+		{
+			addfitb();
+			ch = container.children[container.children.length - 1];
+			ch.children[1].value = q.question || "";
+			ch.children[3].value = q.answer || "";
+		}
+		else continue;
+		
+		if (q.explanation) ch.querySelector(".why").value = q.explanation;
+	}
+	autosave();
+}
+
+function isHeader(line)
+{
+	return line == "(mc)" || line == "(fitb)" || line == "(mat)";
+}
+function isWhy(line)
+{
+	return line.substring(0, 5) == "{WHY}";
+}
+
+function parseScript(s)
+{
+	var lines = s.replace(/\r/g, "").split("\n");
+	var list = [];
+	var i = 0;
+	
+	while (i < lines.length)
+	{
+		var line = lines[i];
+		var q = null;
+		
+		if (line == "(fitb)")
+		{
+			q = {type:"fitb", question:lines[i + 1] || "", answer:lines[i + 2] || ""};
+			i += 3;
+		}
+		else if (line == "(mc)")
+		{
+			q = {type:"mc", question:lines[i + 1] || "", choices:[], answer:-1};
+			i += 2;
+			while (i < lines.length && lines[i] != "" && !isHeader(lines[i]) && !isWhy(lines[i]))
+			{
+				var ts = lines[i];
 				if (ts.substring(0, 9) == "{CHECKED}")
 				{
 					ts = ts.substring(9);
-					ch.children[i].firstChild.checked = true;
+					q.answer = q.choices.length;
 				}
-				ch.children[i].children[1].value = ts;
+				q.choices.push(ts);
+				i++;
 			}
-			removemcq(ch);
-			removemcq(ch);
 		}
-		else if (sm == "(mat)")
+		else if (line == "(mat)")
 		{
-			addmat();
-			var si = sps.indexOf("(mat)");
-			ovt = si + 6;
-			
-			var ch = container.children[container.children.length - 1];
-			var spn = sps.indexOf("", si);
-			
-			for (var i = 0; i < spn - si; i += 2)
+			q = {type:"mat", pairs:[]};
+			i++;
+			while (i < lines.length && lines[i] != "" && !isHeader(lines[i]) && !isWhy(lines[i]))
 			{
-				var tch = ch.children[ch.children.length - 3];
-				addmd(ch);
-				
-				tch.firstChild.value = sps[si + i + 1];
-				tch.children[1].value = sps[si + i + 2];
-				ovt += sps[si + i + 1].length + sps[si + i + 2].length + 2;
+				q.pairs.push([lines[i], lines[i + 1] || ""]);
+				i += 2;
 			}
-			removemd(ch);
-			removemd(ch);
 		}
-		else if (sm == "(fitb)")
+		else
 		{
-			addfitb();
-			var si = sps.indexOf("(fitb)");
-			ovt = sps[si + 1].length + sps[si + 2].length + 9;
-			
-			var tch = container.children[container.children.length - 1];
-			tch.children[1].value = sps[si + 1];
-			tch.children[3].value = sps[si + 2];
+			i++;
+			continue;
 		}
-		s = s.substring(ovt);
+		
+		if (i < lines.length && isWhy(lines[i]))
+		{
+			q.explanation = lines[i].substring(5);
+			i++;
+		}
+		list.push(q);
 	}
+	return list;
+}
+
+function parseJSON(t)
+{
+	var data;
+	try { data = JSON.parse(t); }
+	catch (e) { alert("That is not valid JSON: " + e.message); return []; }
+	
+	var qs = (data instanceof Array) ? data : (data.questions || []);
+	if (data && data.title) lname = data.title;
+	var list = [];
+	
+	for (var i in qs)
+	{
+		var q = qs[i] || {};
+		var out = {type:q.type, question:q.question || q.text || "", explanation:q.explanation || q.why || ""};
+		
+		if (q.type == "mc")
+		{
+			out.choices = q.choices || q.options || [];
+			out.answer = (typeof q.answer == "number") ? q.answer : out.choices.indexOf(q.answer);
+		}
+		else if (q.type == "mat")
+		{
+			out.pairs = [];
+			var pairs = q.pairs || q.matches || [];
+			if (pairs instanceof Array)
+				for (var j in pairs)
+				{
+					var pr = pairs[j];
+					if (pr instanceof Array) out.pairs.push([pr[0] + "", pr[1] + ""]);
+					else out.pairs.push([pr.match || pr.key || "", pr.definition || pr.value || ""]);
+				}
+			else
+				for (var k in pairs) out.pairs.push([k, pairs[k] + ""]);
+		}
+		else if (q.type == "fitb")
+		{
+			out.answer = (q.answer instanceof Array) ? "?!(" + q.answer.join("|") + ")" : (q.answer + "");
+		}
+		else continue;
+		list.push(out);
+	}
+	return list;
+}
+
+function showPaste()
+{
+	if ($("pastebox")) return;
+	var box = document.createElement("div");
+	box.id = "pastebox";
+	box.innerHTML = "<p>Paste a quiz in the plain-text format or as json (see README.md)</p><textarea id='pastetext' placeholder='(mc)\\nWhich planet is closest to the Sun?\\n{CHECKED}Mercury\\nVenus\\n{WHY}An explanation, optional\\n\\n(fitb)\\nThe largest planet is ___.\\nJupiter\\n'></textarea><p><label><input type='checkbox' id='pasteappend' /> add to the current quiz instead of replacing it</label></p><p><button id='assemble' onclick='loadPaste()'>Load</button> <button onclick='closePaste()'>Cancel</button></p>";
+	document.body.appendChild(box);
+	$("pastetext").focus();
+}
+
+function loadPaste()
+{
+	var t = $("pastetext").value;
+	if (t.replace(/\s/g, "") == "") { closePaste(); return; }
+	if (!$("pasteappend").checked) clear();
+	readScript(t);
+	closePaste();
+}
+
+function closePaste()
+{
+	var box = $("pastebox");
+	if (box) document.body.removeChild(box);
+}
+
+// localStorage, all guarded: private windows and blocked storage just mean nothing is remembered
+function save(key, value)
+{
+	try { localStorage.setItem(key, value); return true; }
+	catch (e) { return false; }
+}
+function load(key)
+{
+	try { return localStorage.getItem(key); }
+	catch (e) { return null; }
+}
+function forget(key)
+{
+	try { localStorage.removeItem(key); }
+	catch (e) {}
+}
+
+function autosave()
+{
+	if (mode != "edit") return;
+	if (autosaveTimer) clearTimeout(autosaveTimer);
+	autosaveTimer = setTimeout(function(){
+		autosaveTimer = null;
+		if (mode != "edit") return;
+		save(STORAGE_EDITOR, compileScript());
+	}, 300);
+}
+
+function saveAttempt()
+{
+	if (!attempt) return;
+	var a = {script:attempt.script, order:attempt.order, pos:attempt.pos + 1, results:attempt.results, start:attempt.start, retry:attempt.retry};
+	if (a.pos >= a.order.length) forget(STORAGE_ATTEMPT);
+	else save(STORAGE_ATTEMPT, JSON.stringify(a));
+}
+
+function showResume(json)
+{
+	var a;
+	try { a = JSON.parse(json); }
+	catch (e) { forget(STORAGE_ATTEMPT); return; }
+	if (!a || !a.order || a.pos >= a.order.length) { forget(STORAGE_ATTEMPT); return; }
+	
+	var box = document.createElement("div");
+	box.id = "resume";
+	box.innerHTML = "<p>A quiz was in progress: " + a.pos + " of " + a.order.length + " answered.</p><p><button id='assemble' onclick='resumeAttempt()'>Resume</button> <button onclick='discardAttempt()'>Discard</button></p>";
+	document.body.appendChild(box);
+}
+
+function resumeAttempt()
+{
+	var a;
+	try { a = JSON.parse(load(STORAGE_ATTEMPT)); }
+	catch (e) { a = null; }
+	discardAttempt();
+	if (!a) return;
+	
+	clear();
+	readScript(a.script);
+	thtml = gethtml();
+	qdiv.style.display = "none";
+	doresize();
+	
+	prepareAnswers();
+	attempt = {script:a.script, order:a.order, pos:a.pos, results:a.results || [], start:a.start || Date.now(), retry:!!a.retry};
+	showQuestion();
+}
+
+function discardAttempt()
+{
+	forget(STORAGE_ATTEMPT);
+	var box = $("resume");
+	if (box) document.body.removeChild(box);
 }
 
 function tofile(title, text)
