@@ -163,3 +163,141 @@ input {
 input:hover {
 	border:1px solid blue;
 }
+
+/* Taking a quiz: one question at a time */
+.qhead {
+	color:#555;
+	font-size:14px;
+	margin:8px 10px 0;
+}
+
+.q {
+	line-height:1.5;
+}
+
+.choice {
+	display:block;
+	padding:4px 6px;
+	margin:2px 0;
+	border-radius:3px;
+	cursor:pointer;
+}
+.choice:hover {
+	background:rgba(255, 255, 255, .6);
+}
+.choice.right {
+	background:lightgreen;
+}
+.choice.wrong {
+	background:peachpuff;
+}
+.num {
+	display:inline-block;
+	min-width:1.2em;
+	text-align:center;
+	font-size:12px;
+	color:#666;
+	border:1px solid #bbb;
+	border-radius:3px;
+	background:#f4f4f4;
+}
+
+.qin {
+	width:90%;
+	font-size:16px;
+}
+
+#feedback .why {
+	margin:2px 10px;
+	padding:4px;
+	font-style:italic;
+	color:#333;
+}
+
+.qnav {
+	margin:10px;
+}
+.qnav .hint {
+	display:block;
+	margin-top:6px;
+	font-size:12px;
+	color:#888;
+}
+
+#time {
+	border:1px solid gray;
+	padding:3px;
+	margin:2px;
+	background:radial-gradient(#f9f9f9, #eee);
+}
+
+input.why {
+	font-style:italic;
+	margin-top:4px;
+}
+
+/* Paste import and resume banner */
+#pastebox, #resume {
+	position:fixed;
+	left:50%;
+	top:80px;
+	transform:translateX(-50%);
+	width:min(600px, 92vw);
+	box-sizing:border-box;
+	padding:10px;
+	background:white;
+	border:1px solid gray;
+	box-shadow:0 4px 20px rgba(0, 0, 0, .3);
+	z-index:5;
+}
+#pastebox textarea {
+	width:100%;
+	height:220px;
+	box-sizing:border-box;
+	font:13px monospace;
+}
+
+/* Phones */
+@media (max-width:600px) {
+	#container {
+		border:none;
+		box-shadow:none;
+	}
+	#qstuff {
+		top:0;
+		margin:0;
+		padding:4px 0;
+		border-left:none;
+		border-radius:0;
+	}
+	#qstuff br {
+		display:none;
+	}
+	button {
+		font-size:14px;
+		padding:7px 8px;
+		margin:2px;
+	}
+	input {
+		font-size:16px;
+	}
+	.fsize, .ssize, .qin {
+		width:100%;
+		box-sizing:border-box;
+	}
+	.defs {
+		margin-left:0;
+		display:block;
+		margin-top:8px;
+	}
+	.keys {
+		display:block;
+	}
+	.choice {
+		padding:10px 6px;
+	}
+	#mat, #mc, #fitb {
+		margin-left:4px;
+		margin-right:4px;
+	}
+}
